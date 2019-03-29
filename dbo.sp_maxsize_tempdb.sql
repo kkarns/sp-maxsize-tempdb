@@ -1,15 +1,12 @@
 USE master
 GO
-IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.ROUTINES WHERE ROUTINE_NAME = 'sp_maxsize_tempdb')
-    EXEC ('CREATE PROCEDURE dbo.sp_maxsize_tempdb AS SELECT ''temporary holding procedure''')
-GO
 SET ANSI_NULLS ON
 GO
 
 SET QUOTED_IDENTIFIER ON
 GO
 
-ALTER PROCEDURE [dbo].[sp_maxsize_tempdb]
+CREATE OR ALTER PROCEDURE [dbo].[sp_maxsize_tempdb] 
     @Action                         NVARCHAR(64)    = NULL,
     @LastServerwideCountTempFiles   INT             = NULL,
     @LastTempFilesDrive             NCHAR(1)        = NULL,
@@ -40,7 +37,7 @@ AS
 --
 -- dependencies:
 --      1) a sqlagent job to run this via PowerShell daily
---      
+--      2) depends on SQL Server 2016 SP1 or newer for the mgmt server that runs this sproc b/c of CREATE OR ALTER syntax above
 --
 -- updated:
 --      -- Monday, March 18, 2019 12:33 PM
@@ -180,10 +177,10 @@ BEGIN
     SET @MaxAvailablePerTempFile = (@MinMBFree - @MBToReserve)/@LastServerwideCountTempFiles;
     PRINT '@MaxAvailablePerTempFile: ' + CAST(@MaxAvailablePerTempFile AS NVARCHAR(20));
     
-    SET @RecommendedNewSize = @LargestTempfileSizeInMB + ROUND(ISNULL(@MaxAvailablePerTempFile/1024, 0), 0)*1024;
+    SET @RecommendedNewSize = @LargestTempfileSizeInMB + FLOOR(ISNULL(@MaxAvailablePerTempFile/1024, 0))*1024;
     PRINT '@RecommendedNewSize: ' + CAST(@RecommendedNewSize AS NVARCHAR(20));
 
-    SET @RecommendedNewSizeRounded = ROUND(ISNULL(@RecommendedNewSize/1024, 0), 0)*1024;
+    SET @RecommendedNewSizeRounded = FLOOR(ISNULL(@RecommendedNewSize/1024, 0))*1024;
     PRINT '@RecommendedNewSizeRounded: ' + CAST(@RecommendedNewSizeRounded AS NVARCHAR(20));
     
     PRINT 'Here are the recommendations:'
