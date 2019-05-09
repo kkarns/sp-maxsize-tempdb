@@ -6,7 +6,7 @@ GO
 SET QUOTED_IDENTIFIER ON
 GO
 
-CREATE OR ALTER PROCEDURE [dbo].[sp_maxsize_tempdb] 
+CREATE OR ALTER PROCEDURE [dbo].[sp_maxsize_tempdb]
     @Action                         NVARCHAR(64)    = NULL,
     @LastServerwideCountTempFiles   INT             = NULL,
     @LastTempFilesDrive             NCHAR(1)        = NULL,
@@ -39,6 +39,7 @@ AS
 -- dependencies:
 --      1) a sqlagent job to run this via PowerShell daily
 --      2) depends on SQL Server 2016 SP1 or newer for the mgmt server that runs this sproc b/c of CREATE OR ALTER syntax above
+--      3) depends on sp_Blitz repository table on a mgmt server for calculating volume statistics
 --
 -- updated:
 --      -- Monday, March 18, 2019 12:33 PM
@@ -211,11 +212,6 @@ BEGIN
         PRINT '@RecommendedNewSizeRounded: ' + CAST(@RecommendedNewSizeRounded AS NVARCHAR(20));
     END
     
-<<<<<<< HEAD
-    PRINT 'Here are the recommendations:'
-    SELECT 
-        'alter database [tempdb] modify file (NAME = N''' + LogicalFileName + ''', MAXSIZE = ' + CAST(@RecommendedNewSizeRounded AS NVARCHAR(20)) + ')'
-=======
     -- can't use recommendations if our goal size is smaller than the max current size!!
     IF @RecommendedNewSizeRounded < @LargestTempfileSizeInMB
     BEGIN 
@@ -245,19 +241,10 @@ BEGIN
     PRINT 'Here are the recommendations for ' + @TargetInstanceName  + ':'
     SELECT 
         'ALTER DATABASE [tempdb] MODIFY FILE (NAME = N''' + LogicalFileName + ''', MAXSIZE = ' + CAST(@RecommendedNewSizeRounded AS NVARCHAR(20)) + ');' + CHAR(13) + CHAR(10) + N'GO' + CHAR(13) + CHAR(10)
->>>>>>> cac1863... updated most recent work in progress
     FROM @TempdbFiles;
     
     IF (@Action = N'ALTER')
     BEGIN
-<<<<<<< HEAD
-        select 'todo'
-        PRINT 'altering tempdb on ' + @TargetInstanceName  
-        --SELECT @AlterSQL =
-        --    'alter database [tempdb] modify file (NAME = N''' + LogicalFileName + ''', MAXSIZE = ' + CAST(@RecommendedNewSizeRounded AS NVARCHAR(20)) + ')'
-        --FROM @TempdbFiles;
-
-=======
         DECLARE @altersqlline NVARCHAR(1024) = ''; 
         DECLARE @altersqlfile NVARCHAR(1024) = ''; 
          
@@ -290,7 +277,6 @@ BEGIN
         --EXEC [RemoteServer].master.dbo.sp_executesql @sql, @paramlist, 
         --    @RecommendedNewSizeRounded OUTPUT;     
     
->>>>>>> cac1863... updated most recent work in progress
     END
     
 END
