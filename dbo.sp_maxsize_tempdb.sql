@@ -13,9 +13,10 @@ CREATE OR ALTER PROCEDURE [dbo].[sp_maxsize_tempdb]
     @MBToReserve                    NUMERIC(10,1)   = NULL,
     @BlitzDatabaseName              NVARCHAR(256)   = NULL,
     @BlitzSchemaName                NVARCHAR(256)   = NULL,
-    @BlitzTableName                 NVARCHAR(256)   = NULL, 
+    @BlitzTableName                 NVARCHAR(256)   = NULL,
     @TargetInstanceName             NVARCHAR(256)   = NULL,
-    @TargetLinkName                 NVARCHAR(256)   = NULL   
+    @TargetLinkName                 NVARCHAR(256)   = NULL,
+    @Verbose                        NCHAR(1)        = NULL
 AS
 -----------------------------------------------------------------------------------------------
 -- 
@@ -31,8 +32,8 @@ AS
 --          @TargetLinkName         - linked table linkname on the mgmt instance
 --
 -- syntax:
---      EXEC sp_maxsize_tempdb @Action = N'VERIFY', @LastServerwideCountTempFiles = 8, @LastTempFilesDrive = 'E', @MBToReserve = 5120, @BlitzDatabaseName = N'dbadatabase', @BlitzSchemaName = N'dbo', @BlitzTableName = N'BlitzResults', @TargetInstanceName = N'testdbserver', @TargetLinkName = N'testdbserver_linkname', @VerifyCode = 1 ;
---      EXEC sp_maxsize_tempdb @Action = N'RECOMMEND', @LastServerwideCountTempFiles = 8, @LastTempFilesDrive = 'E', @MBToReserve = 5120, @BlitzDatabaseName = N'dbadatabase', @BlitzSchemaName = N'dbo', @BlitzTableName = N'BlitzResults', @TargetInstanceName = N'testdbserver', @TargetLinkName = N'testdbserver_linkname';
+--      EXEC sp_maxsize_tempdb @Action = N'VERIFY', @LastServerwideCountTempFiles = 8, @LastTempFilesDrive = 'E', @MBToReserve = 5120, @BlitzDatabaseName = N'dbadatabase', @BlitzSchemaName = N'dbo', @BlitzTableName = N'BlitzResults', @TargetInstanceName = N'testdbserver', @TargetLinkName = N'testdbserver_linkname', @Verbose = N'Y';
+--      EXEC sp_maxsize_tempdb @Action = N'RECOMMEND', @LastServerwideCountTempFiles = 8, @LastTempFilesDrive = 'E', @MBToReserve = 5120, @BlitzDatabaseName = N'dbadatabase', @BlitzSchemaName = N'dbo', @BlitzTableName = N'BlitzResults', @TargetInstanceName = N'testdbserver', @TargetLinkName = N'testdbserver_linkname', @Verbose = N'Y';
 --      EXEC sp_maxsize_tempdb @Action = N'Typographical Error';
 --
 -- dependencies:
@@ -44,7 +45,7 @@ AS
 -- 
 
 BEGIN
---SET NOCOUNT ON;
+SET NOCOUNT ON;
 DECLARE @errormessage NVARCHAR(2048), @errornumber INT, @errorseverity INT, @errorstate INT, @errorline INT;
 DECLARE @LargestTempfileSizeInMB NUMERIC(10,1);
 DECLARE @TempFilesDrive NCHAR(1); 
@@ -58,7 +59,7 @@ DECLARE @TempdbFiles TABLE
     );
 DECLARE @MaxAvailablePerTempFile    NUMERIC(10,1);
 DECLARE @RecommendedNewSize         NUMERIC(10,1); 
-DECLARE @RecommendedNewSizeRounded  NUMERIC(10,1);
+DECLARE @RecommendedNewSizeRounded  INT;
 DECLARE @sql NVARCHAR(MAX);
 DECLARE @paramlist  nvarchar(4000);  
     
@@ -83,7 +84,11 @@ BEGIN
     EXEC sp_executesql @sql, @paramlist, 
         @LargestTempfileSizeInMB OUTPUT;
 
-    PRINT @LargestTempfileSizeInMB; -- debug
+    IF (@Verbose = N'Y')
+    BEGIN
+        PRINT '----------------------------------------------'      
+        PRINT '[1] get current max tempdb filesize for [c20]: @LargestTempfileSizeInMB = ' + cast(@LargestTempfileSizeInMB as VARCHAR(20)); 
+    END
 
     -- [2a] -- get drivename for [c4]  
     SELECT @sql =                                                                               
@@ -98,8 +103,13 @@ BEGIN
     EXEC sp_executesql @sql, @paramlist, 
         @TempFilesDrive OUTPUT;
 
-    PRINT @TempFilesDrive;
-    PRINT 'tempfiles are still on the same drive: ' + CASE WHEN @TempFilesDrive <> @LastTempFilesDrive THEN 'false (Warning! The drive that we expect to hold tempdb has changed)' ELSE 'true' END;
+    IF (@Verbose = N'Y')
+    BEGIN
+        PRINT '----------------------------------------------'      
+        PRINT '[2a] -- get current drivename for [c4] and test against where we think the temp file should be:  @TempFilesDrive = ' + @TempFilesDrive;
+        PRINT 'Are tempfiles are still on the expected drive?: ' + CASE WHEN @TempFilesDrive <> @LastTempFilesDrive THEN 'false (Warning! The drive that we expect to hold tempdb has changed)' ELSE 'true' END;
+    END
+
 
     
     -- [2b] to calculate [c13] take the count of nTempFiles, Compare to last known number of temp files, or rerun on ALL instances
@@ -115,8 +125,13 @@ BEGIN
     EXEC sp_executesql @sql, @paramlist, 
         @InstanceCountTempFiles OUTPUT;
 
-    PRINT @InstanceCountTempFiles;
-    PRINT 'serverwide tempfiles are all on this instance: ' + CASE WHEN @InstanceCountTempFiles <> @LastServerwideCountTempFiles THEN 'false (Warning! We need to count the tempfiles on all instances.)' ELSE 'true' END;
+    IF (@Verbose = N'Y')
+    BEGIN
+        PRINT '----------------------------------------------'      
+        PRINT '[2b] to calculate [c13] take the count of nTempFiles, Compare to last known number of temp files, or rerun on ALL instances:  @InstanceCountTempFiles = ' + cast(@InstanceCountTempFiles AS NVARCHAR(20));
+        PRINT 'Looking at this parameter... on a multi-instance server we are sending in @LastServerwideCountTempFiles as our expected server-wide count of temp files'; 
+        PRINT 'Are all serverwide tempfiles on this drive only for this instance?: ' + CASE WHEN @InstanceCountTempFiles <> @LastServerwideCountTempFiles THEN 'false (Warning! We need to count the tempfiles on all instances.)' ELSE 'true' END;
+    END
 
     -- [3] -- get latest montly trend on free space available on the drive [c4] and put the low point into [c6]
     SELECT @sql =                                                                               
@@ -139,9 +154,14 @@ BEGIN
     EXEC sp_executesql @sql, @paramlist, 
         @MinMBFree OUTPUT, @AvgMBFree OUTPUT, @MaxMBFree OUTPUT;     
     
-    PRINT 'MIN MB Free this month: ' + CAST(@MinMBFree AS NVARCHAR(20)) + ' <-- Use this';
-    PRINT 'AVG MB Free this month: ' + CAST(@AvgMBFree AS NVARCHAR(20));
-    PRINT 'MAX MB Free this month: ' + CAST(@MaxMBFree AS NVARCHAR(20));
+    IF (@Verbose = N'Y')
+    BEGIN
+        PRINT '----------------------------------------------'      
+        PRINT '[3] -- get latest montly trend on free space from sp_Blitz() available on the drive [c4] and put the low point into [c6]';
+        PRINT 'MIN MB Free this month: ' + CAST(@MinMBFree AS NVARCHAR(20)) + ' <-- Use this';
+        PRINT 'AVG MB Free this month: ' + CAST(@AvgMBFree AS NVARCHAR(20));
+        PRINT 'MAX MB Free this month: ' + CAST(@MaxMBFree AS NVARCHAR(20));
+    END
     -- todo: check that valid data coming from here first then if not ... SET @VerifyCode = CASE WHEN @InstanceCountTempFiles <> @LastServerwideCountTempFiles THEN @VerifyCode + 330000 ELSE @VerifyCode END
     
 
@@ -157,15 +177,19 @@ BEGIN
         FROM ' + QUOTENAME(@TargetLinkName, N']') + '.tempdb.sys.database_files
         WHERE type = 0 AND name LIKE ''temp%'';'
         
-    -- PRINT @sql; -- debug        
-                                                                                                  
     INSERT INTO #TargetTempdbFiles EXEC sp_executesql @sql;
 
     INSERT @TempdbFiles (LogicalFileName)
     SELECT LogicalFileName from #TargetTempdbFiles
 
-    SELECT LogicalFileName
-    FROM @TempdbFiles;
+    IF (@Verbose = N'Y')
+    BEGIN
+        PRINT '----------------------------------------------'      
+        PRINT '[4] -- get the filenames for the ALTER TABLE commands';
+        PRINT @sql;         
+        SELECT LogicalFileName from #TargetTempdbFiles
+    END
+                                                                                                  
 
     -- [5] -- calculate file MAXSIZE
     IF @LastServerwideCountTempFiles = 0
@@ -174,28 +198,99 @@ BEGIN
         SET @errornumber = 99999;
         THROW 99999, @errormessage, 1; 
     END
-    SET @MaxAvailablePerTempFile = (@MinMBFree - @MBToReserve)/@LastServerwideCountTempFiles;
-    PRINT '@MaxAvailablePerTempFile: ' + CAST(@MaxAvailablePerTempFile AS NVARCHAR(20));
-    
+    SET @MaxAvailablePerTempFile = (@MinMBFree - @MBToReserve)/@LastServerwideCountTempFiles;   
     SET @RecommendedNewSize = @LargestTempfileSizeInMB + FLOOR(ISNULL(@MaxAvailablePerTempFile/1024, 0))*1024;
-    PRINT '@RecommendedNewSize: ' + CAST(@RecommendedNewSize AS NVARCHAR(20));
+    SET @RecommendedNewSizeRounded = CAST(FLOOR(ISNULL(@RecommendedNewSize/1024, 0))*1024 AS INT);
 
-    SET @RecommendedNewSizeRounded = FLOOR(ISNULL(@RecommendedNewSize/1024, 0))*1024;
-    PRINT '@RecommendedNewSizeRounded: ' + CAST(@RecommendedNewSizeRounded AS NVARCHAR(20));
+    IF (@Verbose = N'Y')
+    BEGIN
+        PRINT '----------------------------------------------'      
+        PRINT '[5] -- calculate file MAXSIZE';
+        PRINT '@MaxAvailablePerTempFile: ' + CAST(@MaxAvailablePerTempFile AS NVARCHAR(20));
+        PRINT '@RecommendedNewSize: ' + CAST(@RecommendedNewSize AS NVARCHAR(20));
+        PRINT '@RecommendedNewSizeRounded: ' + CAST(@RecommendedNewSizeRounded AS NVARCHAR(20));
+    END
     
+<<<<<<< HEAD
     PRINT 'Here are the recommendations:'
     SELECT 
         'alter database [tempdb] modify file (NAME = N''' + LogicalFileName + ''', MAXSIZE = ' + CAST(@RecommendedNewSizeRounded AS NVARCHAR(20)) + ')'
-    FROM @TempdbFiles;
+=======
+    -- can't use recommendations if our goal size is smaller than the max current size!!
+    IF @RecommendedNewSizeRounded < @LargestTempfileSizeInMB
+    BEGIN 
+        IF (@Verbose = N'Y')
+        BEGIN
+            PRINT N'error, value for new recommendation = ' + isnull(''''+  CAST(@RecommendedNewSizeRounded AS NVARCHAR(20))  +'''','null') + ' is less than current max tempdb size = ' + isnull(''''+  CAST(@LargestTempfileSizeInMB AS NVARCHAR(20))  +'''','null');
+        END
+        SET @errormessage = N'error, value for new recommendation = ' + isnull(''''+  CAST(@RecommendedNewSizeRounded AS NVARCHAR(20))  +'''','null') + ' is less than current max tempdb size = ' + isnull(''''+  CAST(@LargestTempfileSizeInMB AS NVARCHAR(20))  +'''','null');
+        SET @errornumber = 99999;
+        THROW 99999, @errormessage, 1; 
+    END
 
+    -- This section (current settings) is presented regardless of @Verbose flag
+    PRINT '----------------------------------------------'      
+    PRINT 'Here are the current settings for ' + @TargetInstanceName  + ':'
+
+    SELECT @sql =                                                                               
+        'SELECT LEFT(name, 20) AS name, CASE WHEN maxsize = -1 THEN 2097152 ELSE (maxsize/128) END  as current_file_maxsize_mb
+        FROM ' + QUOTENAME(@TargetLinkName, N']') + '.tempdb.dbo.sysfiles 
+        WHERE groupid = 1
+        ORDER BY fileid'
+
+    EXEC sp_executesql @sql;
+    
+    -- This section (recommendation) is presented regardless of @Verbose flag
+    PRINT '----------------------------------------------'      
+    PRINT 'Here are the recommendations for ' + @TargetInstanceName  + ':'
+    SELECT 
+        'ALTER DATABASE [tempdb] MODIFY FILE (NAME = N''' + LogicalFileName + ''', MAXSIZE = ' + CAST(@RecommendedNewSizeRounded AS NVARCHAR(20)) + ');' + CHAR(13) + CHAR(10) + N'GO' + CHAR(13) + CHAR(10)
+>>>>>>> cac1863... updated most recent work in progress
+    FROM @TempdbFiles;
+    
     IF (@Action = N'ALTER')
     BEGIN
+<<<<<<< HEAD
         select 'todo'
         PRINT 'altering tempdb on ' + @TargetInstanceName  
         --SELECT @AlterSQL =
         --    'alter database [tempdb] modify file (NAME = N''' + LogicalFileName + ''', MAXSIZE = ' + CAST(@RecommendedNewSizeRounded AS NVARCHAR(20)) + ')'
         --FROM @TempdbFiles;
 
+=======
+        DECLARE @altersqlline NVARCHAR(1024) = ''; 
+        DECLARE @altersqlfile NVARCHAR(1024) = ''; 
+         
+        DECLARE c CURSOR LOCAL FAST_FORWARD FOR
+            SELECT N'ALTER DATABASE [tempdb] MODIFY FILE (NAME = N''' + LogicalFileName + N''', MAXSIZE = '' + CAST(@xRecommendedNewSizeRounded AS NVARCHAR(20)) + '');''' + CHAR(13) + CHAR(10) + N'GO' + CHAR(13) + CHAR(10) AS altersql FROM #TargetTempdbFiles
+        
+        OPEN c;
+        FETCH c INTO @altersqlline;
+        
+        WHILE (@@FETCH_STATUS = 0)
+        BEGIN
+            SET @altersqlfile = @altersqlfile + @altersqlline;
+            FETCH c INTO @altersqlline;
+        END
+         
+        CLOSE c;
+        DEALLOCATE c;
+         
+        IF (@Verbose = N'Y')
+        BEGIN
+            PRINT '----------------------------------------------'      
+            PRINT 'Here is the parameterized SQL batch for the ALTER statements: ' 
+            PRINT @altersqlfile;         
+        END    
+       
+        --SELECT @sql = @altersqlfile;                                                                              
+        --    
+        --SELECT @paramlist = '@xRecommendedNewSizeRounded NUMERIC(10,1) OUTPUT'; 
+        --
+        --EXEC [RemoteServer].master.dbo.sp_executesql @sql, @paramlist, 
+        --    @RecommendedNewSizeRounded OUTPUT;     
+    
+>>>>>>> cac1863... updated most recent work in progress
     END
     
 END
