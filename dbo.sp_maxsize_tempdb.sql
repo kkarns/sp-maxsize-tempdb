@@ -49,6 +49,7 @@ BEGIN
 SET NOCOUNT ON;
 DECLARE @errormessage NVARCHAR(2048), @errornumber INT, @errorseverity INT, @errorstate INT, @errorline INT;
 DECLARE @LargestTempfileSizeInMB NUMERIC(10,1);
+DECLARE @LargestMaxTempfileSizeInMB NUMERIC(10,1);
 DECLARE @TempFilesDrive NCHAR(1); 
 DECLARE @InstanceCountTempFiles INT; 
 DECLARE @MinMBFree NUMERIC(10,1);
@@ -61,6 +62,7 @@ DECLARE @TempdbFiles TABLE
 DECLARE @MaxAvailablePerTempFile    NUMERIC(10,1);
 DECLARE @RecommendedNewSize         NUMERIC(10,1); 
 DECLARE @RecommendedNewSizeRounded  INT;
+DECLARE @RecommendedProgression     NVARCHAR(40);
 DECLARE @sql NVARCHAR(MAX);
 DECLARE @paramlist  nvarchar(4000);  
     
@@ -89,6 +91,25 @@ BEGIN
     BEGIN
         PRINT '----------------------------------------------'      
         PRINT '[1] get current max tempdb filesize for [c20]: @LargestTempfileSizeInMB = ' + cast(@LargestTempfileSizeInMB as VARCHAR(20)); 
+    END
+
+    -- [1b] -- get current max of maxsize for tempdb files 
+    SELECT @sql =                                                                               
+        'SELECT 
+            @xLargestMaxTempfileSizeInMB = MAX(CAST(maxsize/128.0 AS NUMERIC(10,1))) 
+        FROM ' + QUOTENAME(@TargetLinkName, N']') + '.tempdb.dbo.sysfiles
+        WHERE groupid = 1' 
+    
+    SELECT 
+        @paramlist = '@xLargestMaxTempfileSizeInMB NUMERIC(10,1) OUTPUT'                                                                   
+                                                                                                
+    EXEC sp_executesql @sql, @paramlist, 
+        @LargestMaxTempfileSizeInMB OUTPUT;
+
+    IF (@Verbose = N'Y')
+    BEGIN
+        PRINT '----------------------------------------------'      
+        PRINT '[1b] get current max of maxsize for tempdb files : @LargestMaxTempfileSizeInMB = ' + cast(@LargestMaxTempfileSizeInMB as VARCHAR(20)); 
     END
 
     -- [2a] -- get drivename for [c4]  
@@ -236,9 +257,15 @@ BEGIN
 
     EXEC sp_executesql @sql;
     
+    -- for recommendation text .. figure out to say whether recommendations are 'decreasing', 'same' or 'increasing'
+    SET @RecommendedProgression = CASE 
+        WHEN (@LargestMaxTempfileSizeInMB < @RecommendedNewSizeRounded) THEN 'increase - more space avail for TempDB'
+        WHEN (@LargestMaxTempfileSizeInMB > @RecommendedNewSizeRounded) THEN 'decrease - less space avail for TempDB'        
+        ELSE 'same' END;
+    
     -- This section (recommendation) is presented regardless of @Verbose flag
     PRINT '----------------------------------------------'      
-    PRINT 'Here are the recommendations for ' + @TargetInstanceName  + ':'
+    PRINT 'Here are the recommendations for ' + @TargetInstanceName  + ':    ' + @RecommendedProgression;
     SELECT 
         'ALTER DATABASE [tempdb] MODIFY FILE (NAME = N''' + LogicalFileName + ''', MAXSIZE = ' + CAST(@RecommendedNewSizeRounded AS NVARCHAR(20)) + ');' + CHAR(13) + CHAR(10) + N'GO' + CHAR(13) + CHAR(10)
     FROM @TempdbFiles;
