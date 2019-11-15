@@ -43,6 +43,7 @@ AS
 --
 -- updated:
 --      -- Monday, March 18, 2019 12:33 PM
+--      -- Friday, November 15, 2019 3:02 PM
 -- 
 
 BEGIN
@@ -62,7 +63,7 @@ DECLARE @TempdbFiles TABLE
 DECLARE @MaxAvailablePerTempFile    NUMERIC(10,1);
 DECLARE @RecommendedNewSize         NUMERIC(10,1); 
 DECLARE @RecommendedNewSizeRounded  INT;
-DECLARE @RecommendedProgression     NVARCHAR(40);
+DECLARE @RecommendedProgression     NVARCHAR(MAX);
 DECLARE @sql NVARCHAR(MAX);
 DECLARE @paramlist  nvarchar(4000);  
     
@@ -233,18 +234,6 @@ BEGIN
         PRINT '@RecommendedNewSizeRounded: ' + CAST(@RecommendedNewSizeRounded AS NVARCHAR(20));
     END
     
-    -- can't use recommendations if our goal size is smaller than the max current size!!
-    IF @RecommendedNewSizeRounded < @LargestTempfileSizeInMB
-    BEGIN 
-        IF (@Verbose = N'Y')
-        BEGIN
-            PRINT N'error, value for new recommendation = ' + isnull(''''+  CAST(@RecommendedNewSizeRounded AS NVARCHAR(20))  +'''','null') + ' is less than current max tempdb size = ' + isnull(''''+  CAST(@LargestTempfileSizeInMB AS NVARCHAR(20))  +'''','null');
-        END
-        SET @errormessage = N'error, value for new recommendation = ' + isnull(''''+  CAST(@RecommendedNewSizeRounded AS NVARCHAR(20))  +'''','null') + ' is less than current max tempdb size = ' + isnull(''''+  CAST(@LargestTempfileSizeInMB AS NVARCHAR(20))  +'''','null');
-        SET @errornumber = 99999;
-        THROW 99999, @errormessage, 1; 
-    END
-
     -- This section (current settings) is presented regardless of @Verbose flag
     PRINT '----------------------------------------------'      
     PRINT 'Here are the current settings for ' + @TargetInstanceName  + ':'
@@ -262,6 +251,11 @@ BEGIN
         WHEN (@LargestMaxTempfileSizeInMB < @RecommendedNewSizeRounded) THEN 'increase - more space avail for TempDB'
         WHEN (@LargestMaxTempfileSizeInMB > @RecommendedNewSizeRounded) THEN 'decrease - less space avail for TempDB'        
         ELSE 'same' END;
+
+    -- for recommendation text .. redesign the 99999 exception, treat it for what it really means - inability to maintain the goal minimum disk space on the drive.
+    SET @RecommendedProgression = @RecommendedProgression + CASE 
+        WHEN (@RecommendedNewSizeRounded < @LargestTempfileSizeInMB) THEN ' - WARNING!  We have reached a failure to maintain the goal minimum disk space on the drive.  What this means for the dba is that either the disk needs to be enlarged at the operating system level, or utilization of tempdb needs to change because at this point an application flooding tempdb will soon be generating error Msg 1101.'
+        ELSE '' END;
     
     -- This section (recommendation) is presented regardless of @Verbose flag
     PRINT '----------------------------------------------'      
