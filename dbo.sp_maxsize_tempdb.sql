@@ -44,6 +44,7 @@ AS
 -- updated:
 --      -- Monday, March 18, 2019 12:33 PM
 --      -- Friday, November 15, 2019 3:02 PM
+--      -- Tuesday, January 14, 2020 2:34 PM
 -- 
 
 BEGIN
@@ -233,6 +234,9 @@ BEGIN
         PRINT '@RecommendedNewSize: ' + CAST(@RecommendedNewSize AS NVARCHAR(20));
         PRINT '@RecommendedNewSizeRounded: ' + CAST(@RecommendedNewSizeRounded AS NVARCHAR(20));
     END
+    
+    -- adjust any negative size to zero, since negative recommendations are silly
+    SET @RecommendedNewSizeRounded = CASE WHEN @RecommendedNewSizeRounded > 0 THEN @RecommendedNewSizeRounded ELSE 0 END ;
     
     -- This section (current settings) is presented regardless of @Verbose flag
     PRINT '----------------------------------------------'      
